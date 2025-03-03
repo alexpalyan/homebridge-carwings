@@ -48,13 +48,6 @@ function CarwingsAccessory(log, config) {
     .getCharacteristic(Characteristic.ChargingState)
     .on("get", this.getCharging.bind(this));
 
-  this.hvac = new Service.Fanv2(this.name);
-
-  this.hvac
-    .getCharacteristic(Characteristic.Active)
-    .on("get", this.getHVAC.bind(this))
-    .on("set", this.setHVAC.bind(this));
-
   this.heater = new Service.HeaterCooler(this.name);
 
   this.heater
@@ -62,12 +55,9 @@ function CarwingsAccessory(log, config) {
     .on("get", this.getHVAC.bind(this))
     .on("set", this.setHVAC.bind(this));
 
-  this.switch = new Service.Switch(this.name);
-
-  this.switch
-    .getCharacteristic(Characteristic.On)
-    .on("get", this.getHVAC.bind(this))
-    .on("set", this.setHVAC.bind(this));
+  this.heater
+    .getCharacteristic(Characteristic.CurrentTemperature)
+    .on("get", this.getCabinTemp.bind(this));
 
   var updateInterval = config["updateInterval"]
     ? config["updateInterval"]
@@ -94,7 +84,7 @@ CarwingsAccessory.prototype.getLevel = function (callback) {
   //console.log(this.battery.getCharacteristic(Characteristic.BatteryLevel));
   var _this = this;
   carwings.batteryRecords(carwingsSession).then(function (status) {
-    console.log(status);
+    // console.log(status);
     if (status.status == 401) {
       loginCarwings();
     }
@@ -127,7 +117,6 @@ CarwingsAccessory.prototype.getCharging = function (callback) {
     return;
   }
   carwings.batteryRecords(carwingsSession).then(function (status) {
-    console.log(status);
     if (status.status == 401) {
       loginCarwings();
     }
@@ -143,9 +132,7 @@ CarwingsAccessory.prototype.getHVAC = function (callback) {
   if (!carwingsSession) {
     return;
   }
-  console.log(this);
   carwings.hvacStatus(carwingsSession).then(function (status) {
-    console.log(status);
     if (status.status == 401) {
       loginCarwings();
     }
@@ -157,13 +144,25 @@ CarwingsAccessory.prototype.getHVAC = function (callback) {
   });
 };
 
+CarwingsAccessory.prototype.getCabinTemp = function (callback) {
+  if (!carwingsSession) {
+    return;
+  }
+  carwings.cabinTemp(carwingsSession).then(function (status) {
+    console.log(status);
+    if (status.status == 401) {
+      loginCarwings();
+    }
+    callback(null, status.Inc_temp);
+  });
+};
+
 CarwingsAccessory.prototype.setHVAC = function (on, callback) {
   if (!carwingsSession) {
     return;
   }
   if (on) {
     carwings.hvacOn(carwingsSession).then(function (status) {
-      console.log(status);
       if (status.status == 401) {
         loginCarwings();
       }
@@ -171,7 +170,6 @@ CarwingsAccessory.prototype.setHVAC = function (on, callback) {
     });
   } else {
     carwings.hvacOff(carwingsSession).then(function (status) {
-      console.log(status);
       if (status.status == 401) {
         loginCarwings();
       }
