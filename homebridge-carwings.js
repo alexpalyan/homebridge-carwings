@@ -88,6 +88,9 @@ function CarwingsAccessory(log, config) {
 }
 
 CarwingsAccessory.prototype.getLevel = function (callback) {
+  if (!carwingsSession) {
+    return;
+  }
   //console.log(this.battery.getCharacteristic(Characteristic.BatteryLevel));
   var _this = this;
   carwings.batteryRecords(carwingsSession).then(function (status) {
@@ -120,6 +123,9 @@ CarwingsAccessory.prototype.getLevel = function (callback) {
 };
 
 CarwingsAccessory.prototype.getCharging = function (callback) {
+  if (!carwingsSession) {
+    return;
+  }
   carwings.batteryRecords(carwingsSession).then(function (status) {
     console.log(status);
     if (status.status == 401) {
@@ -134,6 +140,9 @@ CarwingsAccessory.prototype.getCharging = function (callback) {
 };
 
 CarwingsAccessory.prototype.getHVAC = function (callback) {
+  if (!carwingsSession) {
+    return;
+  }
   console.log(this);
   carwings.hvacStatus(carwingsSession).then(function (status) {
     console.log(status);
@@ -149,6 +158,9 @@ CarwingsAccessory.prototype.getHVAC = function (callback) {
 };
 
 CarwingsAccessory.prototype.setHVAC = function (on, callback) {
+  if (!carwingsSession) {
+    return;
+  }
   if (on) {
     carwings.hvacOn(carwingsSession).then(function (status) {
       console.log(status);
