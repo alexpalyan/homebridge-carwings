@@ -18,10 +18,13 @@ var base64regex =
   /^(?:[A-Z0-9+\/]{4})*(?:[A-Z0-9+\/]{2}==|[A-Z0-9+\/]{3}=|[A-Z0-9+\/]{4})$/i;
 
 var email, password, region;
-function loginCarwings() {
+function loginCarwings(callback) {
+  carwingsSession = null;
   carwings.loginSession(email, password, region).then(function (session) {
     carwingsSession = session;
-    carwings.batteryStatusCheckRequest(carwingsSession);
+    if (callback) {
+      callback(session);
+    }
   });
 }
 
@@ -36,125 +39,100 @@ function CarwingsAccessory(log, config) {
     password = Buffer.from(password, "base64");
   }
 
-  loginCarwings();
-
   this.battery = new Service.BatteryService(this.name);
-
-  this.battery
-    .getCharacteristic(Characteristic.BatteryLevel)
-    .on("get", this.getLevel.bind(this));
-
-  this.battery
-    .getCharacteristic(Characteristic.ChargingState)
-    .on("get", this.getCharging.bind(this));
 
   this.heater = new Service.HeaterCooler(this.name);
 
   this.heater
     .getCharacteristic(Characteristic.Active)
-    .on("get", this.getHVAC.bind(this))
     .on("set", this.setHVAC.bind(this));
-
-  this.heater
-    .getCharacteristic(Characteristic.CurrentTemperature)
-    .on("get", this.getCabinTemp.bind(this));
 
   var updateInterval = config["updateInterval"]
     ? config["updateInterval"]
-    : 600000;
+    : 3600;
 
-  if (updateInterval != "never") {
-    setInterval(function () {
-      carwings
-        .batteryStatusCheckRequest(carwingsSession)
-        .then(function (checkStatus) {
-          console.log("Got LEAF request on interval", checkStatus);
-          if (checkStatus.status == 401) {
-            loginCarwings();
-          }
-        });
-    }, 600000);
-  }
+  _this = this;
+  loginCarwings(async () => {
+    await _this.updateBattery();
+    await _this.updateHVACStatus();
+    await _this.updateCabinTemp();
+    if (updateInterval != "never") {
+      setInterval(async () => {
+        await _this.updateBattery();
+        await _this.updateHVACStatus();
+        await _this.updateCabinTemp();
+      }, updateInterval * 1000);
+    }
+  });
 }
 
-CarwingsAccessory.prototype.getLevel = function (callback) {
+CarwingsAccessory.prototype.updateBattery = async function () {
   if (!carwingsSession) {
     return;
   }
-  //console.log(this.battery.getCharacteristic(Characteristic.BatteryLevel));
+
   var _this = this;
-  carwings.batteryRecords(carwingsSession).then(function (status) {
-    // console.log(status);
-    if (status.status == 401) {
-      loginCarwings();
-    }
-    carwings.batteryStatusCheckRequest(carwingsSession);
-    /*_this.battery.getCharacteristic(Characteristic.BatteryLevel).setProp({
-      maxValue: status.BatteryStatusRecords.BatteryStatus.BatteryCapacity
-    });*/
-    //_this.battery.getCharacteristic(Characteristic.BatteryLevel).props.maxValue = parseInt(status.BatteryStatusRecords.BatteryStatus.BatteryCapacity);
+  let status = await carwings.batteryStatusCheck(carwingsSession);
+  // console.log(status);
+  if (status.status == 401) {
+    loginCarwings();
+    return;
+  }
 
-    var chargePercent = 0;
-    if (status.BatteryStatusRecords?.BatteryStatus?.SOC?.Value) {
-      chargePercent = parseInt(
-        status.BatteryStatusRecords.BatteryStatus.SOC.Value,
-      );
-    } else {
-      chargePercent = parseInt(
-        (status.BatteryStatusRecords.BatteryStatus.BatteryRemainingAmount /
-          12) *
-          100,
-      );
-      if (chargePercent > 100) chargePercent = 100;
-    }
-    console.log("LEAF charge percent = ", chargePercent);
-    callback(null, chargePercent);
-  });
+  var chargePercent = Math.round(
+    (parseInt(status.batteryDegradation) / parseInt(status.batteryCapacity)) *
+      100,
+  );
+  console.log("LEAF charge percent = ", chargePercent);
+  _this.battery
+    .getCharacteristic(Characteristic.BatteryLevel)
+    .updateValue(chargePercent);
+  _this.battery
+    .getCharacteristic(Characteristic.ChargingState)
+    .updateValue(status.charging == "YES");
+  _this.battery
+    .getCharacteristic(Characteristic.StatusLowBattery)
+    .updateValue(chargePercent < 20);
 };
 
-CarwingsAccessory.prototype.getCharging = function (callback) {
+CarwingsAccessory.prototype.updateHVACStatus = async function () {
   if (!carwingsSession) {
     return;
   }
-  carwings.batteryRecords(carwingsSession).then(function (status) {
-    if (status.status == 401) {
-      loginCarwings();
-    }
-    callback(
-      null,
-      status.BatteryStatusRecords.BatteryStatus.BatteryChargingStatus !=
-        "NOT_CHARGING",
-    );
-  });
+
+  var _this = this;
+  let status = await carwings.hvacStatus(carwingsSession);
+  if (status.status == 401) {
+    loginCarwings();
+    return;
+  }
+  if (status.RemoteACRecords) {
+    _this.heater
+      .getCharacteristic(Characteristic.Active)
+      .updateValue(status.RemoteACRecords.RemoteACOperation !== "STOP");
+    _this.heater
+      .getCharacteristic(Characteristic.CoolingThresholdTemperature)
+      .updateValue(parseInt(status.RemoteACRecords.PreAC_temp));
+    _this.heater
+      .getCharacteristic(Characteristic.HeatingThresholdTemperature)
+      .updateValue(parseInt(status.RemoteACRecords.PreAC_temp));
+  }
 };
 
-CarwingsAccessory.prototype.getHVAC = function (callback) {
+CarwingsAccessory.prototype.updateCabinTemp = async function () {
   if (!carwingsSession) {
     return;
   }
-  carwings.hvacStatus(carwingsSession).then(function (status) {
-    if (status.status == 401) {
-      loginCarwings();
-    }
-    callback(
-      null,
-      status.RemoteACRecords &&
-        status.RemoteACRecords.RemoteACOperation !== "STOP",
-    );
-  });
-};
 
-CarwingsAccessory.prototype.getCabinTemp = function (callback) {
-  if (!carwingsSession) {
-    return;
+  var _this = this;
+  let status = await carwings.cabinTemp(carwingsSession);
+  if (status.status == 401) {
+    loginCarwings();
   }
-  carwings.cabinTemp(carwingsSession).then(function (status) {
-    console.log(status);
-    if (status.status == 401) {
-      loginCarwings();
-    }
-    callback(null, status.Inc_temp);
-  });
+  console.log("LEAF cabin temp = ", status.Inc_temp);
+  _this.heater
+    .getCharacteristic(Characteristic.CurrentTemperature)
+    .updateValue(parseInt(status.Inc_temp));
 };
 
 CarwingsAccessory.prototype.setHVAC = function (on, callback) {
@@ -178,6 +156,20 @@ CarwingsAccessory.prototype.setHVAC = function (on, callback) {
   }
 };
 
+CarwingsAccessory.prototype.setCharge = function (on, callback) {
+  if (!carwingsSession) {
+    return;
+  }
+  if (on) {
+    carwings.batteryStartCharging(carwingsSession).then(function (status) {
+      if (status.status == 401) {
+        loginCarwings();
+      }
+      callback(null, true);
+    });
+  }
+};
+
 CarwingsAccessory.prototype.getServices = function () {
-  return [this.battery, this.hvac, this.heater, this.switch];
+  return [this.battery, this.heater];
 };
